@@ -1,0 +1,1 @@
+ALTER TABLE pago ADD COLUMN idempotencyKey VARCHAR(100) NULL;

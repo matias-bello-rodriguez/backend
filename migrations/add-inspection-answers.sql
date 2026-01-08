@@ -1,0 +1,2 @@
+ALTER TABLE inspeccion ADD COLUMN answers JSON NULL;
+ALTER TABLE inspeccion ADD COLUMN comments JSON NULL;
