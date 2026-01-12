@@ -1,25 +1,31 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { v2 as cloudinary } from 'cloudinary';
-import * as crypto from 'crypto';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { GeneratePresignedUrlDto } from './dto/generate-presigned-url.dto';
 import { GetPresignedDownloadUrlDto } from './dto/get-presigned-download-url.dto';
 
 @Injectable()
 export class UploadsService {
-  constructor(private configService: ConfigService) {
-    const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
-    const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY');
-    const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
+  private s3Client: S3Client;
+  private bucketName: string;
 
-    if (!cloudName || !apiKey || !apiSecret) {
-      console.warn('⚠️ Cloudinary credentials not fully configured. Uploads will fail.');
+  constructor(private configService: ConfigService) {
+    const region = this.configService.get<string>('AWS_REGION') || 'us-east-1';
+    const accessKeyId = this.configService.get<string>('AWS_ACCESS_KEY_ID');
+    const secretAccessKey = this.configService.get<string>('AWS_SECRET_ACCESS_KEY');
+    this.bucketName = this.configService.get<string>('AWS_BUCKET_NAME');
+
+    if (!accessKeyId || !secretAccessKey || !this.bucketName) {
+      console.warn('⚠️ AWS S3 credentials not fully configured. Uploads will fail.');
     }
 
-    cloudinary.config({
-      cloud_name: cloudName,
-      api_key: apiKey,
-      api_secret: apiSecret,
+    this.s3Client = new S3Client({
+      region,
+      credentials: {
+        accessKeyId: accessKeyId || '',
+        secretAccessKey: secretAccessKey || '',
+      },
     });
   }
 
@@ -28,50 +34,33 @@ export class UploadsService {
     const timestamp = Math.floor(Date.now() / 1000);
     // Sanitize filename to avoid issues
     const sanitizedFileName = dto.fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const publicId = `${folder}/${timestamp}_${sanitizedFileName}`;
+    const key = `${folder}/${timestamp}_${sanitizedFileName}`;
 
     try {
-      // Generate a signed request for Cloudinary
-      // Los parámetros deben estar en orden alfabético para la firma
-      const params = {
-        folder: folder,
-        public_id: publicId,
-        timestamp: timestamp,
-      };
-
-      // Calcular firma correctamente: SHA-1 de los parámetros en orden alfabético + api_secret
-      const paramsArray = Object.keys(params)
-        .sort()
-        .map(key => `${key}=${params[key]}`);
-      const stringToSign = paramsArray.join('&');
-      const signature = crypto
-        .createHash('sha1')
-        .update(stringToSign + this.configService.get<string>('CLOUDINARY_API_SECRET'))
-        .digest('hex');
-
-      // Direct upload URL for client-side uploads
-      const cloudName = this.configService.get('CLOUDINARY_CLOUD_NAME');
-      const apiKey = this.configService.get('CLOUDINARY_API_KEY');
-      const clientUploadUrl = `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`;
-
-      // The public URL for display
-      const publicUrl = cloudinary.url(publicId, {
-        secure: true,
-        fetch_format: 'auto',
-        quality: 'auto',
+      const command = new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: key,
+        ContentType: dto.contentType || 'application/octet-stream',
+        // ACL: 'public-read', // Uncomment if you want public access by default and bucket allows it
       });
 
+      const url = await getSignedUrl(this.s3Client, command, { expiresIn: 3600 });
+      
+      // For public access (if bucket policy allows), constructs url
+      // const publicUrl = `https://${this.bucketName}.s3.${this.configService.get('AWS_REGION')}.amazonaws.com/${key}`;
+      // Or use the signed url itself for temporary access
+      
+      // For compatibility with frontend expecting a certain structure:
       return {
-        url: clientUploadUrl,
-        uploadUrl: clientUploadUrl,
-        publicId,
-        publicUrl,
-        key: publicId,
-        signature,
-        timestamp,
-        api_key: apiKey,
-        folder,
+        url,       // The PUT URL
+        uploadUrl: url, // Alias
+        publicId: key,  // S3 Key matches Cloudinary publicId concept in usage
+        publicUrl: url.split('?')[0], // The base URL without signature
+        key: key,
         expires: new Date(Date.now() + 3600 * 1000).toISOString(),
+        // Extra fields mock for frontend compatibility if needed
+        timestamp,
+        folder,
       };
     } catch (error) {
       console.error('Error generating upload URL:', error);
@@ -88,31 +77,34 @@ export class UploadsService {
 
   async generatePresignedDownloadUrl(dto: GetPresignedDownloadUrlDto) {
     try {
-      // For Cloudinary, we simply return the direct URL with transformations
-      const publicUrl = cloudinary.url(dto.key, {
-        secure: true,
-        fetch_format: 'auto',
-        quality: 'auto',
+      const command = new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: dto.key,
       });
 
+      const url = await getSignedUrl(this.s3Client, command, { expiresIn: 3600 });
+
       return {
-        url: publicUrl,
+        url,
         expires: new Date(Date.now() + 3600 * 1000).toISOString(),
       };
     } catch (error) {
-      console.error('Error generating download URL:', error);
-      throw new InternalServerErrorException('Could not generate download URL');
+       console.error('Error generating download URL:', error);
+       throw new InternalServerErrorException('Could not generate download URL');
     }
   }
 
-  async deleteFile(publicId: string) {
-    try {
-      await cloudinary.uploader.destroy(publicId);
-      console.log(`🗑️ [UPLOADS] File deleted from Cloudinary: ${publicId}`);
-      return { success: true, publicId };
-    } catch (error) {
-      console.error('Error deleting file from Cloudinary:', error);
-      throw new InternalServerErrorException('Could not delete file');
-    }
+  async deleteFile(key: string) {
+      try {
+          const command = new DeleteObjectCommand({
+              Bucket: this.bucketName,
+              Key: key,
+          });
+          await this.s3Client.send(command);
+          return { message: 'File deleted successfully', key };
+      } catch (error) {
+          console.error('Error deleting file:', error);
+          throw new InternalServerErrorException('Could not delete file');
+      }
   }
 }

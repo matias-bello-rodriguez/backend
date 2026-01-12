@@ -62,6 +62,23 @@ export class NotificationsService {
           console.log(`✅ [NotificationsService] Notification created in DB (AGENDAR_ADMIN): ${notification.id}`);
         }
 
+        // Send Push via WebSocket (Real-time in-app)
+        try {
+            const socketUrl = process.env.SOCKET_URL || 'http://localhost:3002';
+            await fetch(`${socketUrl}/notify-users`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userIds: [admin.id],
+                    title,
+                    message: body,
+                    data: { ...metadata, origin: 'backend' }
+                })
+            });
+        } catch (error) {
+            console.error('Failed to notify via socket:', error.message);
+        }
+
         // Send Push if token exists
         if (admin.pushToken) {
           console.log(`🚀 [NotificationsService] Sending push to token: ${admin.pushToken}`);
