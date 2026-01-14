@@ -180,14 +180,66 @@ export class PaymentsController {
   @Post('webpay/confirm')
   async confirmWebPayTransaction(@Body() body: { token_ws: string }) {
     try {
-      const result = await this.webPayService.confirmTransaction(body.token_ws);
-
-      // Update DB transaction record if present
+      console.log('📥 Confirmando transacción WebPay con token:', body.token_ws);
+      
+      // Verificar si la transacción ya fue confirmada
       const tx = await this.webpayRepo.findOne({ where: { token: body.token_ws } });
-      if (tx) {
-        tx.status = result?.status || result?.data?.status || tx.status || 'AUTHORIZED';
-        tx.responseCode = result?.transaction?.response_code || result?.response_code || tx.responseCode;
-        tx.authorizationCode = result?.transaction?.authorization_code || tx.authorizationCode;
+      
+      let result: any;
+      let alreadyProcessed = false;
+      
+      // Si ya está autorizada, no volver a confirmar con Transbank
+      if (tx && (tx.status === 'AUTHORIZED' || tx.authorizationCode)) {
+        console.log('⚠️ Transacción ya procesada, usando datos almacenados:', tx.id);
+        alreadyProcessed = true;
+        result = {
+          status: tx.status,
+          response_code: tx.responseCode,
+          authorization_code: tx.authorizationCode,
+          amount: tx.amount,
+          buy_order: tx.buyOrder,
+          session_id: tx.sessionId
+        };
+      } else {
+        // Intentar confirmar con Transbank
+        try {
+          result = await this.webPayService.confirmTransaction(body.token_ws);
+          console.log('✅ Resultado de WebPay:', JSON.stringify(result));
+        } catch (confirmError: any) {
+          // Error 422: Transacción ya procesada por otro proceso
+          if (confirmError?.message?.includes('422') || 
+              confirmError?.message?.includes('already locked') ||
+              confirmError?.message?.includes('Invalid status')) {
+            console.log('⚠️ Error 422: Transacción ya procesada, verificando estado en DB');
+            
+            // Recargar datos de la DB por si otro proceso la actualizó
+            const updatedTx = await this.webpayRepo.findOne({ where: { token: body.token_ws } });
+            if (updatedTx && (updatedTx.status === 'AUTHORIZED' || updatedTx.authorizationCode)) {
+              alreadyProcessed = true;
+              result = {
+                status: updatedTx.status,
+                response_code: updatedTx.responseCode,
+                authorization_code: updatedTx.authorizationCode,
+                amount: updatedTx.amount,
+                buy_order: updatedTx.buyOrder,
+                session_id: updatedTx.sessionId
+              };
+            } else {
+              // No tenemos estado confirmado en DB, propagar el error
+              throw confirmError;
+            }
+          } else {
+            throw confirmError;
+          }
+        }
+      }
+
+      // Update DB transaction record if present and not already processed
+      if (tx && !alreadyProcessed) {
+        console.log('📝 Actualizando transacción en DB:', tx.id);
+        tx.status = result?.status || 'AUTHORIZED';
+        tx.responseCode = result?.response_code;
+        tx.authorizationCode = result?.authorization_code;
         await this.webpayRepo.save(tx);
 
         // ✅ SI EXISTE UN PAGO VINCULADO, SIEMPRE LO APROBAMOS DESPUÉS DE WEBPAY
@@ -199,6 +251,8 @@ export class PaymentsController {
             console.warn('⚠️ No se pudo actualizar estado del pago en DB:', e);
           }
         }
+      } else {
+        console.warn('⚠️ No se encontró transacción en DB para token:', body.token_ws);
       }
 
       // Check if this transaction is related to a publication+inspection combo
@@ -302,13 +356,22 @@ export class PaymentsController {
       // If `inspection.publicacionId` is set (or similar relation), then it's a combo.
       // Let's check `Inspection` entity.
       
-      const status = result?.status || result?.data?.status || (result?.transaction?.response_code === 0 ? 'AUTHORIZED' : 'UNKNOWN');
-      const success = typeof result?.success === 'boolean' ? result.success : (result?.transaction?.response_code === 0 || status === 'AUTHORIZED');
-      const transaction = result?.transaction || result;
-      return { ok: success, success, status, transaction, data: result };
+      console.log('📤 Retornando confirmación:', result);
+      return result;
     } catch (error) {
-      console.error('Error confirming WebPay transaction:', error);
-      throw error;
+      console.error('❌ Error confirmando transacción WebPay:', error);
+      console.error('❌ Stack trace:', error.stack);
+      
+      // Devolver error detallado para debugging
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+          message: 'Error al confirmar transacción WebPay',
+          error: error.message,
+          details: error.stack
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
     }
   }
 
@@ -351,14 +414,46 @@ export class PaymentsController {
 
       // Confirm the transaction server-side immediately and update DB
       let commitResult: any = null;
-      try {
-        commitResult = await this.webPayService.confirmTransaction(tokenWs);
-      } catch (e) {
-        console.error('Error committing transaction from callback:', e);
+      const tx = await this.webpayRepo.findOne({ where: { token: tokenWs } });
+      
+      // Si ya está procesada, no volver a confirmar
+      if (tx && (tx.status === 'AUTHORIZED' || tx.authorizationCode)) {
+        console.log('⚠️ [Callback] Transacción ya procesada:', tx.id);
+        commitResult = {
+          status: tx.status,
+          transaction: {
+            response_code: tx.responseCode,
+            authorization_code: tx.authorizationCode
+          }
+        };
+      } else {
+        try {
+          commitResult = await this.webPayService.confirmTransaction(tokenWs);
+        } catch (e: any) {
+          // Si es error 422, verificar estado en DB
+          if (e?.message?.includes('422') || 
+              e?.message?.includes('already locked') ||
+              e?.message?.includes('Invalid status')) {
+            console.log('⚠️ [Callback] Error 422, verificando estado en DB');
+            const reloadedTx = await this.webpayRepo.findOne({ where: { token: tokenWs } });
+            if (reloadedTx && (reloadedTx.status === 'AUTHORIZED' || reloadedTx.authorizationCode)) {
+              commitResult = {
+                status: reloadedTx.status,
+                transaction: {
+                  response_code: reloadedTx.responseCode,
+                  authorization_code: reloadedTx.authorizationCode
+                }
+              };
+            } else {
+              console.error('Error committing transaction from callback:', e);
+            }
+          } else {
+            console.error('Error committing transaction from callback:', e);
+          }
+        }
       }
 
       // Update DB record
-      const tx = await this.webpayRepo.findOne({ where: { token: tokenWs } });
       if (tx) {
         tx.status = commitResult?.status || commitResult?.data?.status || tx.status || 'UNKNOWN';
         tx.responseCode = commitResult?.transaction?.response_code || tx.responseCode;

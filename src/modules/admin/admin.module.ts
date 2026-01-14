@@ -13,11 +13,13 @@ import { SedeSchedule } from '../../entities/SedeSchedule.entity';
 import { SystemSetting } from '../../entities/SystemSetting.entity';
 import { Valor } from '../../entities/Valor.entity';
 import { UsersModule } from '../users/users.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, Vehicle, Publication, Inspection, PagoMecanico, Payment, UserSchedule, SedeSchedule, SystemSetting, Valor]),
     UsersModule,
+    NotificationsModule,
   ],
   controllers: [AdminController],
   providers: [AdminService],

@@ -28,6 +28,9 @@ import { Valor } from './entities/Valor.entity';
 import { WalletTransaction } from './entities/WalletTransaction.entity';
 import { SolicitudInspeccion } from './entities/SolicitudInspeccion.entity';
 import { PagoMecanico } from './entities/PagoMecanico.entity';
+import { PublicationModeration } from './entities/PublicationModeration.entity';
+import { RefundRequest } from './entities/RefundRequest.entity';
+import { UserBankAccount } from './entities/UserBankAccount.entity';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
@@ -44,6 +47,7 @@ import { SearchModule } from './modules/search/search.module';
 import { SearchHistoryModule } from './modules/search/search-history.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { SedesModule } from './modules/sedes/sedes.module';
+import { RefundsModule } from './modules/refunds/refunds.module';
 
 @Module({
   imports: [
@@ -85,6 +89,9 @@ import { SedesModule } from './modules/sedes/sedes.module';
         WalletTransaction,
         SolicitudInspeccion,
         PagoMecanico,
+        PublicationModeration,
+        RefundRequest,
+        UserBankAccount,
       ],
       synchronize: false, // Cambiado a false para usar las tablas existentes en la BD
     }),
@@ -103,6 +110,7 @@ import { SedesModule } from './modules/sedes/sedes.module';
     SearchHistoryModule,
     AdminModule,
     SedesModule,
+    RefundsModule,
   ],
   controllers: [],
   providers: [],

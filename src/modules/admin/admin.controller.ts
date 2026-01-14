@@ -185,4 +185,11 @@ export class AdminController {
   ) {
     return this.adminService.registerMechanicPayment(id, body.amount, body.receiptUrl, body.inspectionIds);
   }
+
+  @Get('mechanic-payments/:id')
+  @Roles(UserRole.ADMINISTRADOR, UserRole.MECANICO) // Permitir tanto admin como mecánico
+  @ApiOperation({ summary: 'Obtener detalle de pago a mecánico' })
+  async getMechanicPayment(@Param('id') id: string) {
+    return this.adminService.getMechanicPaymentById(id);
+  }
 }

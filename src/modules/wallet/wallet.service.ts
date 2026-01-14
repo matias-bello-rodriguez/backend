@@ -130,7 +130,7 @@ export class WalletService {
     // URL de retorno a la app (deep link) o página intermedia
     // Para Expo Go en desarrollo, usar IP local o esquema personalizado
     // Aquí usaremos una página de éxito del backend que redirija a la app
-    const baseUrl = process.env.API_URL || 'http://192.168.0.8:3000';
+    const baseUrl = process.env.API_URL || 'http://192.168.0.6:3000';
     const returnUrl = `${baseUrl}/wallet/public/deposit/transbank/return`;
     
     console.log('Creating Webpay Transaction:');

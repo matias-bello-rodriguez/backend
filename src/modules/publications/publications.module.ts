@@ -10,11 +10,22 @@ import { Inspection } from '../../entities/Inspection.entity';
 import { SolicitudInspeccion } from '../../entities/SolicitudInspeccion.entity';
 import { Valor } from '../../entities/Valor.entity';
 import { User } from '../../entities/User.entity';
+import { PublicationModeration } from '../../entities/PublicationModeration.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Publication, PublicationLike, PublicationPhoto, PublicationPaymentDetail, Inspection, SolicitudInspeccion, Valor, User]),
+    TypeOrmModule.forFeature([
+        Publication, 
+        PublicationLike, 
+        PublicationPhoto, 
+        PublicationPaymentDetail, 
+        Inspection, 
+        SolicitudInspeccion, 
+        Valor, 
+        User,
+        PublicationModeration
+    ]),
     NotificationsModule,
   ],
   controllers: [PublicationsController],

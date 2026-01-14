@@ -32,6 +32,7 @@ export enum NotificationType {
   REAGENDAR_DUENO = 'reagendar_dueno',
   NOT_DESACTIVAR_PUB_ADMIN = 'not_desactivar_pub_admin',
   NOT_DESACTIVAR_PUB_VEND = 'not_desactivar_pub_vend',
+  PAGO_RECIBIDO_MEC = 'pago_recibido_mec',
 }
 
 @Entity('notificacion')

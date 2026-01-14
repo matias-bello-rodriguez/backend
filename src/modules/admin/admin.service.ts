@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, DataSource } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
+import * as nodemailer from 'nodemailer';
 import { User, UserRole } from '../../entities/User.entity';
 import { Vehicle } from '../../entities/Vehicle.entity';
 import { Publication, PublicationStatus } from '../../entities/Publication.entity';
@@ -11,9 +13,14 @@ import { UserSchedule } from '../../entities/UserSchedule.entity';
 import { SedeSchedule } from '../../entities/SedeSchedule.entity';
 import { SystemSetting } from '../../entities/SystemSetting.entity';
 import { Valor } from '../../entities/Valor.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../../entities/Notification.entity';
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+  private transporter: nodemailer.Transporter;
+
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
@@ -36,7 +43,30 @@ export class AdminService {
     @InjectRepository(PagoMecanico)
     private pagoMecanicoRepository: Repository<PagoMecanico>,
     private dataSource: DataSource,
-  ) {}
+    private notificationsService: NotificationsService,
+    private configService: ConfigService,
+  ) {
+    // Configurar transporter de email
+    const smtpHost = this.configService.get<string>('SMTP_HOST');
+    const smtpPort = this.configService.get<number>('SMTP_PORT');
+    const smtpUser = this.configService.get<string>('SMTP_USER');
+    const smtpPass = this.configService.get<string>('SMTP_PASS');
+
+    if (smtpHost && smtpPort && smtpUser && smtpPass) {
+      this.transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
+      this.logger.log('✅ Email transporter configured');
+    } else {
+      this.logger.warn('⚠️ SMTP configuration missing. Email sending will be disabled.');
+    }
+  }
 
   async getGlobalSettings() {
     const valores = await this.valorRepository.find();
@@ -789,11 +819,91 @@ export class AdminService {
           );
         }
 
+        // Obtener información del mecánico
+        const mechanic = await this.userRepository.findOne({
+          where: { id: mechanicId },
+          select: ['id', 'email', 'primerNombre', 'primerApellido', 'pushToken']
+        });
+
+        if (mechanic) {
+          // 1. Crear notificación en la app
+          const title = 'Pago Recibido';
+          const message = `Has recibido un pago de $${amount.toLocaleString('es-CL')}. Revisa el comprobante adjunto.`;
+          
+          await this.notificationsService.create({
+            userId: mechanic.id,
+            title,
+            message,
+            type: NotificationType.PAGO_RECIBIDO_MEC,
+            relatedId: payment.id.toString(),
+          });
+
+          // 2. Enviar push notification
+          if (mechanic.pushToken) {
+            await this.notificationsService.sendPushNotification(
+              mechanic.pushToken,
+              title,
+              message,
+              { paymentId: payment.id, receiptUrl, amount }
+            );
+          }
+
+          // 3. Enviar email
+          if (this.transporter && mechanic.email) {
+            try {
+              await this.transporter.sendMail({
+                from: this.configService.get<string>('SMTP_FROM', '"AutoBox" <noreply@autobox.cl>'),
+                to: mechanic.email,
+                subject: 'Pago Recibido - AutoBox',
+                html: `
+                  <div style="font-family: Arial, sans-serif; padding: 20px;">
+                    <h2>Pago Recibido</h2>
+                    <p>Hola ${mechanic.primerNombre || 'Mecánico'},</p>
+                    <p>Has recibido un pago por parte de AutoBox.</p>
+                    <div style="background: #f4f6f8; padding: 20px; margin: 20px 0; border-radius: 8px;">
+                      <p><strong>Monto:</strong> $${amount.toLocaleString('es-CL')}</p>
+                      <p><strong>Fecha:</strong> ${new Date().toLocaleDateString('es-CL')}</p>
+                      <p><strong>Inspecciones pagadas:</strong> ${inspectionIds.length}</p>
+                    </div>
+                    <p>Puedes ver el comprobante de pago en la aplicación o haciendo clic en el siguiente enlace:</p>
+                    <a href="${receiptUrl}" style="display: inline-block; background: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 10px 0;">
+                      Ver Comprobante
+                    </a>
+                    <br><br>
+                    <p>Gracias por tu trabajo,<br>El equipo de AutoBox</p>
+                  </div>
+                `,
+              });
+              this.logger.log(`✅ Payment notification email sent to ${mechanic.email}`);
+            } catch (error) {
+              this.logger.error(`❌ Error sending payment email to ${mechanic.email}:`, error);
+            }
+          }
+        }
+
         return payment;
       });
     } catch (error) {
        console.error('[AdminService] Error registering payment:', error);
        throw error;
+    }
+  }
+
+  async getMechanicPaymentById(paymentId: string) {
+    try {
+      const payment = await this.pagoMecanicoRepository.findOne({
+        where: { id: parseInt(paymentId, 10) },
+        relations: ['mecanico'],
+      });
+
+      if (!payment) {
+        throw new NotFoundException('Pago no encontrado');
+      }
+
+      return payment;
+    } catch (error) {
+      console.error('[AdminService] Error getting payment:', error);
+      throw error;
     }
   }
 }

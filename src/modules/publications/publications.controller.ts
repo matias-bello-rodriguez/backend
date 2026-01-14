@@ -16,11 +16,28 @@ import { CreatePublicationDto } from './dto/create-publication.dto';
 import { UpdatePublicationDto } from './dto/update-publication.dto';
 import { FilterPublicationDto } from './dto/filter-publication.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../../entities/User.entity';
 
 @ApiTags('Publications')
 @Controller('publications')
 export class PublicationsController {
   constructor(private readonly publicationsService: PublicationsService) {}
+
+  @Post(':id/block')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMINISTRADOR)
+  @ApiOperation({ summary: 'Bloquear publicación por inapropiada (Admin)' })
+  @ApiResponse({ status: 200, description: 'Publicación bloqueada y notificada.' })
+  blockPublication(
+    @Param('id') id: string,
+    @Body('reason') reason: string,
+    @Request() req,
+  ) {
+    return this.publicationsService.blockPublication(id, reason, req.user.id);
+  }
 
   @Post()
   @ApiBearerAuth()

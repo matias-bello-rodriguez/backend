@@ -277,10 +277,11 @@ export class VehiclesService {
           transmission: vehicleData.transmission || '',
           doors: vehicleData.doors || null,
           vehicleType: vehicleData.type || '',
-          vin: vehicleData.vin || '',
+          vin: vehicleData.vinNumber || vehicleData.vin || '',
           engineNumber: vehicleData.engineNumber || '',
           engine: vehicleData.engine || '',
           monthRT: vehicleData.monthRT || '',
+          kilometers: vehicleData.mileage ? String(vehicleData.mileage) : '',
         },
       };
 
