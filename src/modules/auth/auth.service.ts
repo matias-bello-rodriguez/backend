@@ -111,14 +111,58 @@ export class AuthService {
       throw new UnauthorizedException('Email not found');
     }
 
-    // TODO: Implementar envío de email con token de recuperación
-    // Por ahora solo retornamos un mensaje de éxito
-    console.log('📧 [AUTH] Forgot password request for:', email);
+    // Generar token numérico de 6 dígitos
+    const token = Math.floor(100000 + Math.random() * 900000).toString();
+    const expires = new Date();
+    expires.setHours(expires.getHours() + 1); // Expira en 1 hora
+
+    await this.usersService.update(user.id, {
+      reset_token: token,
+      reset_token_expires: expires,
+    });
+
+    // TODO: Implementar envío de email real con el token
+    console.log(`📧 [AUTH] Recovery Token for ${email}: ${token}`);
     
     return {
-      message: 'Password reset email sent',
+      message: 'Token enviado al correo',
       email: user.email,
+      // DEV ONLY: devolver token para pruebas
+      debug_token: token 
     };
+  }
+
+  async verifyResetToken(email: string, token: string) {
+    const user = await this.usersService.findByEmail(email);
+    if (!user) {
+      throw new UnauthorizedException('Usuario no encontrado');
+    }
+
+    if (user.reset_token !== token) {
+      throw new UnauthorizedException('Token inválido');
+    }
+
+    if (new Date() > user.reset_token_expires) {
+      throw new UnauthorizedException('El token ha expirado');
+    }
+
+    return { valid: true, message: 'Token válido' };
+  }
+
+  async resetPassword(email: string, token: string, newPassword: string) {
+    await this.verifyResetToken(email, token);
+    const user = await this.usersService.findByEmail(email);
+    
+    const salt = await bcrypt.genSalt();
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    await this.usersService.update(user.id, {
+      password: hashedPassword,
+      reset_token: null,
+      reset_token_expires: null,
+    });
+
+    return { message: 'Contraseña actualizada correctamente' };
   }
 
   async getUserProfile(userId: string) {

@@ -10,8 +10,8 @@ export class GeneratePresignedUrlDto {
   @IsString()
   contentType: string;
 
-  @ApiPropertyOptional({ enum: ['vehicles', 'inspections', 'users', 'publications'], default: 'vehicles' })
-  @IsEnum(['vehicles', 'inspections', 'users', 'publications'])
+  @ApiPropertyOptional({ enum: ['vehicles', 'inspections', 'users', 'publications', 'receipts'], default: 'vehicles' })
+  @IsEnum(['vehicles', 'inspections', 'users', 'publications', 'receipts'])
   @IsOptional()
   folder?: string;
 }

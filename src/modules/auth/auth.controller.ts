@@ -96,4 +96,35 @@ export class AuthController {
   async forgotPassword(@Body('email') email: string) {
     return this.authService.forgotPassword(email);
   }
+
+  @Post('verify-token')
+  @ApiOperation({ summary: 'Verificar token de recuperación' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        email: { type: 'string' },
+        token: { type: 'string' },
+      },
+    },
+  })
+  async verifyToken(@Body() body: { email: string; token: string }) {
+    return this.authService.verifyResetToken(body.email, body.token);
+  }
+
+  @Post('reset-password')
+  @ApiOperation({ summary: 'Restablecer contraseña' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        email: { type: 'string' },
+        token: { type: 'string' },
+        newPassword: { type: 'string' },
+      },
+    },
+  })
+  async resetPassword(@Body() body: { email: string; token: string; newPassword: string }) {
+    return this.authService.resetPassword(body.email, body.token, body.newPassword);
+  }
 }

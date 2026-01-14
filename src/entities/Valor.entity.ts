@@ -8,7 +8,7 @@ export class Valor {
   @Column({ length: 100 })
   nombre: string;
 
-  @Column({ type: 'int' })
+  @Column({ type: 'decimal', precision: 10, scale: 2 })
   precio: number;
 
   @Column({ default: true })

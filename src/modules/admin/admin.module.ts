@@ -7,6 +7,7 @@ import { Vehicle } from '../../entities/Vehicle.entity';
 import { Publication } from '../../entities/Publication.entity';
 import { Inspection } from '../../entities/Inspection.entity';
 import { Payment } from '../../entities/Payment.entity';
+import { PagoMecanico } from '../../entities/PagoMecanico.entity';
 import { UserSchedule } from '../../entities/UserSchedule.entity';
 import { SedeSchedule } from '../../entities/SedeSchedule.entity';
 import { SystemSetting } from '../../entities/SystemSetting.entity';
@@ -15,7 +16,7 @@ import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Vehicle, Publication, Inspection, Payment, UserSchedule, SedeSchedule, SystemSetting, Valor]),
+    TypeOrmModule.forFeature([User, Vehicle, Publication, Inspection, PagoMecanico, Payment, UserSchedule, SedeSchedule, SystemSetting, Valor]),
     UsersModule,
   ],
   controllers: [AdminController],

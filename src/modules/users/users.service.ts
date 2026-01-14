@@ -147,4 +147,10 @@ export class UsersService {
         return { exists: true };
     }
   }
+
+  async update(id: string, updateUserDto: Partial<User>): Promise<User> {
+    const user = await this.findOne(id);
+    this.usersRepository.merge(user, updateUserDto);
+    return this.usersRepository.save(user);
+  }
 }

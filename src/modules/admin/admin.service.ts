@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In, DataSource } from 'typeorm';
 import { User, UserRole } from '../../entities/User.entity';
 import { Vehicle } from '../../entities/Vehicle.entity';
 import { Publication, PublicationStatus } from '../../entities/Publication.entity';
 import { Inspection, InspectionStatus } from '../../entities/Inspection.entity';
+import { PagoMecanico } from '../../entities/PagoMecanico.entity';
 import { Payment, PaymentStatus } from '../../entities/Payment.entity';
 import { UserSchedule } from '../../entities/UserSchedule.entity';
 import { SedeSchedule } from '../../entities/SedeSchedule.entity';
@@ -32,6 +33,9 @@ export class AdminService {
     private systemSettingRepository: Repository<SystemSetting>,
     @InjectRepository(Valor)
     private valorRepository: Repository<Valor>,
+    @InjectRepository(PagoMecanico)
+    private pagoMecanicoRepository: Repository<PagoMecanico>,
+    private dataSource: DataSource,
   ) {}
 
   async getGlobalSettings() {
@@ -39,11 +43,13 @@ export class AdminService {
     
     const inspectionPrice = valores.find(v => v.nombre === 'Inspección')?.precio || 40000;
     const publicationPrice = valores.find(v => v.nombre === 'Publicación')?.precio || 25000;
+    const mechanicBonus = valores.find(v => v.nombre === 'bonificacion')?.precio || 0.10;
 
     return {
       pricing: {
         inspectionPrice,
         publicationPrice,
+        mechanicBonus,
       },
     };
   }
@@ -69,6 +75,22 @@ export class AdminService {
           await this.valorRepository.save(publication);
         } else {
           console.warn('Publication valor not found');
+        }
+
+        const bonus = await this.valorRepository.findOne({ where: { nombre: 'bonificacion' } });
+        if (bonus) {
+          console.log('Updating mechanic bonus to:', settings.pricing.mechanicBonus);
+          bonus.precio = settings.pricing.mechanicBonus;
+          await this.valorRepository.save(bonus);
+        } else {
+            // Create if not exists with fixed ID 3 as per req
+            const newBonus = this.valorRepository.create({
+                id: 3,
+                nombre: 'bonificacion',
+                precio: settings.pricing.mechanicBonus,
+                activo: true
+            });
+            await this.valorRepository.save(newBonus);
         }
       }
 
@@ -209,6 +231,10 @@ export class AdminService {
     limit?: number,
     offset?: number,
   ) {
+    const settings = await this.getGlobalSettings();
+    const bonusRate = settings.pricing?.mechanicBonus || 0.10;
+    const inspectionBasePrice = settings.pricing?.inspectionPrice || 40000;
+
     const query = this.userRepository.createQueryBuilder('user')
       .leftJoinAndSelect(
         (subQuery) =>
@@ -221,6 +247,38 @@ export class AdminService {
         'stats',
         'stats.mecanicoId = user.id',
       )
+      .leftJoinAndSelect(
+        (subQuery) =>
+          subQuery
+            .select('inspection.mecanicoId', 'mecanicoId')
+            .addSelect('COUNT(*)', 'assignedCount')
+            .from(Inspection, 'inspection')
+             // Assigned means not finished and not cancelled/rejected. 
+             // Assuming assigned means mechanicId is not null.
+             // Usually includes: CONFIRMADA, EN_REVISION, PENDIENTE (if mechanic is assigned)
+             // Using InspectionStatus enum. 
+             // However, PENDIENTE usually means waiting for mechanic assignment or acceptance.
+             // Let's assume assigned means inspection.mecanicoId is set and status != FINALIZADA and != CANCELADA/RECHAZADA
+            .where('inspection.mecanicoId IS NOT NULL')
+            .andWhere('inspection.estado_insp NOT IN (:...finishedStatuses)', { finishedStatuses: [InspectionStatus.FINALIZADA, InspectionStatus.RECHAZADA] })
+            .groupBy('inspection.mecanicoId'),
+        'assignedStats',
+        'assignedStats.mecanicoId = user.id',
+      )
+      .leftJoinAndSelect(
+        (subQuery) =>
+          subQuery
+            .select('inspection.mecanicoId', 'mecanicoId')
+            .addSelect('COUNT(*)', 'unpaidCount')
+            .addSelect('SUM(COALESCE(inspection.valor, :basePrice))', 'unpaidTotal')
+            .from(Inspection, 'inspection')
+            .where('inspection.estado_insp = :status', { status: InspectionStatus.FINALIZADA })
+            .andWhere('inspection.pagada = :paid', { paid: false })
+            .groupBy('inspection.mecanicoId'),
+        'unpaidStats',
+        'unpaidStats.mecanicoId = user.id',
+      )
+      .setParameter('basePrice', inspectionBasePrice)
       .where('user.rol = :role', { role: UserRole.MECANICO });
 
     // Filtro de búsqueda
@@ -297,8 +355,15 @@ export class AdminService {
 
     const mechanics = await query.getRawAndEntities();
 
+    const normalizedBonusRate = Number(bonusRate) > 1 ? Number(bonusRate) / 100 : Number(bonusRate);
+
     const mechanicsWithStats = mechanics.entities.map((m, index) => {
       const raw = mechanics.raw[index];
+      const unpaidCount = parseInt(raw.unpaidCount || raw.unpaidStats_unpaidCount || '0', 10);
+      const unpaidTotal = parseFloat(raw.unpaidTotal || raw.unpaidStats_unpaidTotal || '0');
+      
+      const pendingAmount = unpaidTotal * normalizedBonusRate;
+
       return {
         id: m.id,
         firstName: m.primerNombre,
@@ -309,7 +374,11 @@ export class AdminService {
         status: m.activo ? 'active' : 'inactive',
         createdAt: m.fechaCreacion,
         profilePhoto: m.foto_url,
-        completedInspections: parseInt(raw.stats_completedCount || '0', 10),
+        completedInspections: parseInt(raw.completedCount || raw.stats_completedCount || '0', 10),
+        assignedInspections: parseInt(raw.assignedCount || raw.assignedStats_assignedCount || '0', 10),
+        currentBalance: 0, // Deprecated/Removed from UI but kept for type compatibility if needed
+        pendingPayments: pendingAmount,
+        pendingInspectionsCount: unpaidCount,
         rating: 5.0,
       };
     });
@@ -317,6 +386,68 @@ export class AdminService {
     return {
       mechanics: mechanicsWithStats,
       total,
+    };
+  }
+
+  async getMechanicById(id: string) {
+    const mechanic = await this.userRepository.findOne({
+      where: { id, rol: UserRole.MECANICO },
+      relations: ['schedules'],
+    });
+
+    if (!mechanic) {
+      throw new NotFoundException(`Mechanic with ID ${id} not found`);
+    }
+
+    const completedInspections = await this.inspectionRepository.count({
+      where: { mecanico: { id }, estado_insp: InspectionStatus.FINALIZADA },
+    });
+
+    return {
+      id: mechanic.id,
+      firstName: mechanic.primerNombre,
+      lastName: mechanic.primerApellido,
+      email: mechanic.email,
+      phone: mechanic.telefono,
+      rut: mechanic.rut,
+      status: mechanic.activo ? 'active' : 'inactive',
+      createdAt: mechanic.fechaCreacion,
+      profilePhoto: mechanic.foto_url,
+      specialization: '', // Add this field if available in entity or related table
+      completedInspections,
+      rating: 4.5, // Placeholder
+      schedules: mechanic.schedules,
+    };
+  }
+
+  async updateMechanic(id: string, data: any) {
+    const mechanic = await this.userRepository.findOne({
+      where: { id, rol: UserRole.MECANICO },
+    });
+
+    if (!mechanic) {
+      throw new NotFoundException(`Mechanic with ID ${id} not found`);
+    }
+
+    if (data.firstName) mechanic.primerNombre = data.firstName;
+    if (data.lastName) mechanic.primerApellido = data.lastName;
+    if (data.email) mechanic.email = data.email;
+    if (data.phone) mechanic.telefono = data.phone;
+    
+    // Ignore specialization if not present in entity
+    
+    await this.userRepository.save(mechanic);
+
+    return {
+      id: mechanic.id,
+      firstName: mechanic.primerNombre,
+      lastName: mechanic.primerApellido,
+      email: mechanic.email,
+      phone: mechanic.telefono,
+      rut: mechanic.rut,
+      status: mechanic.activo ? 'active' : 'inactive',
+      createdAt: mechanic.fechaCreacion,
+      profilePhoto: mechanic.foto_url,
     };
   }
 
@@ -593,5 +724,76 @@ export class AdminService {
     await this.publicationRepository.save(publication);
 
     return { success: true, publication };
+  }
+
+  async getMechanicDebt(mechanicId: string) {
+    const unpaidInspections = await this.inspectionRepository.find({
+      where: {
+        mecanicoId: mechanicId,
+        estado_insp: InspectionStatus.FINALIZADA,
+        pagada: false
+      },
+    });
+
+    const settings = await this.getGlobalSettings();
+    const bonusRate = settings.pricing.mechanicBonus || 0.10;
+    const inspectionBasePrice = settings.pricing.inspectionPrice || 40000;
+
+    const normalizedBonusRate = Number(bonusRate) > 1 ? Number(bonusRate) / 100 : Number(bonusRate);
+
+    let totalDebt = 0;
+    const details = unpaidInspections.map(ins => {
+      const price = ins.valor || inspectionBasePrice;
+      const commission = Number(price) * normalizedBonusRate;
+      totalDebt += commission;
+      // @ts-ignore
+      const date = ins.fechaCreacion || ins.createdAt || new Date();
+      return {
+        inspectionId: ins.id,
+        date: date,
+        amount: commission
+      };
+    });
+
+    return {
+      totalDebt,
+      count: unpaidInspections.length,
+      inspections: details
+    };
+  }
+
+  async registerMechanicPayment(
+    mechanicId: string, 
+    amount: number, 
+    receiptUrl: string, 
+    inspectionIds: string[]
+  ) {
+    console.log(`[AdminService] Registering payment for mechanic ${mechanicId}, amount: ${amount}, inspections: ${inspectionIds.length}`);
+    try {
+      return await this.dataSource.transaction(async manager => {
+        const payment = new PagoMecanico();
+        payment.mecanico_id = mechanicId;
+        payment.monto = amount;
+        payment.fecha_pago = new Date();
+        payment.comprobante_url = receiptUrl;
+        
+        console.log('[AdminService] Saving payment entity...');
+        await manager.save(payment);
+        console.log('[AdminService] Payment saved with ID:', payment.id);
+
+        if (inspectionIds.length > 0) {
+          console.log('[AdminService] Updating inspections paid status...');
+          await manager.update(Inspection, 
+            { id: In(inspectionIds) }, 
+            { pagada: true }
+          );
+        }
+
+        return payment;
+      });
+    } catch (error) {
+       console.error('[AdminService] Error registering payment:', error);
+       throw error;
+    }
   }
 }

@@ -27,6 +27,7 @@ import { SystemSetting } from './entities/SystemSetting.entity';
 import { Valor } from './entities/Valor.entity';
 import { WalletTransaction } from './entities/WalletTransaction.entity';
 import { SolicitudInspeccion } from './entities/SolicitudInspeccion.entity';
+import { PagoMecanico } from './entities/PagoMecanico.entity';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
@@ -83,6 +84,7 @@ import { SedesModule } from './modules/sedes/sedes.module';
         Valor,
         WalletTransaction,
         SolicitudInspeccion,
+        PagoMecanico,
       ],
       synchronize: false, // Cambiado a false para usar las tablas existentes en la BD
     }),

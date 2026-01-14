@@ -28,6 +28,12 @@ export class User {
   @Column({ length: 50, nullable: true })
   primerNombre: string;
 
+  @Column({ length: 255, nullable: true })
+  reset_token: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  reset_token_expires: Date;
+
   @Column({ length: 50, nullable: true })
   segundoNombre: string;
 

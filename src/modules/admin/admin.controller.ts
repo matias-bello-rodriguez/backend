@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Body,
   Query,
@@ -67,6 +68,18 @@ export class AdminController {
       limit,
       offset,
     );
+  }
+
+  @Get('mechanics/:id')
+  @ApiOperation({ summary: 'Obtener mecánico por ID' })
+  getMechanicById(@Param('id') id: string) {
+    return this.adminService.getMechanicById(id);
+  }
+
+  @Patch('mechanics/:id')
+  @ApiOperation({ summary: 'Actualizar mecánico' })
+  updateMechanic(@Param('id') id: string, @Body() body: any) {
+    return this.adminService.updateMechanic(id, body);
   }
 
   @Get('mechanics/:id/schedule')
@@ -156,5 +169,20 @@ export class AdminController {
   @ApiOperation({ summary: 'Eliminar publicación' })
   deletePublication(@Param('id') id: string) {
     return this.adminService.deletePublication(id);
+  }
+
+  @Get('mechanics/:id/debt')
+  @ApiOperation({ summary: 'Obtener deuda del mecánico' })
+  async getMechanicDebt(@Param('id') id: string) {
+    return this.adminService.getMechanicDebt(id);
+  }
+
+  @Post('mechanics/:id/pay')
+  @ApiOperation({ summary: 'Registrar pago a mecánico' })
+  async registerPayment(
+    @Param('id') id: string,
+    @Body() body: { amount: number; receiptUrl: string; inspectionIds: string[] }
+  ) {
+    return this.adminService.registerMechanicPayment(id, body.amount, body.receiptUrl, body.inspectionIds);
   }
 }

@@ -48,6 +48,9 @@ export class Inspection {
   @JoinColumn({ name: 'publicacionId' })
   publicacion: Publication;
 
+  @Column({ default: false })
+  pagada: boolean;
+
   @Column({ nullable: true })
   horarioId: number;
 

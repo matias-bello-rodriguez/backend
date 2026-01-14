@@ -1,0 +1,11 @@
+INSERT INTO valor (id, nombre, precio, activo) VALUES (3, 'bonificacion', 5000, true);
+-- The user specified percentage but the table has integer 'precio'. 
+-- We will interpret this 'precio' field as percentage * 100 or something similar, OR assume the column is integer and we might store 50 for 50%.
+-- However, user said "se expresa en 0.00 a 1". Since the column is INT, we cannot store 0.15 directly unless we change the column type or store it as basis points (e.g. 15 -> 15%).
+-- But wait, the user said "en la tabla valor, con id 3 y nombre 'bonificacion'".
+-- If `precio` is INT, 0 or 1 are the only options if we don't scale it.
+-- Let's assume for now we store it as an integer percentage (e.g. 10 for 10%, 0.1 would be 10).
+-- OR maybe the table structure allows float? 'precio' is usually integer price.
+-- Checking User Request: "se expresa en 0.00 a 1".
+-- If I store 10, does it mean 10% or 1000%?
+-- Let's check `update-valor-prices.sql` to see what types of values are there.
