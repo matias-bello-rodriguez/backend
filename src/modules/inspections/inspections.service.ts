@@ -542,11 +542,16 @@ export class InspectionsService {
     const actor = isSeller ? 'vendedor' : 'mecánico';
     const reasonText = reason ? ` Motivo: ${reason}` : '';
 
-    // 1. Notify Admin
+    // 1. Notify Admin (Solicitud de cancelación/aviso)
     await this.notificationsService.notifyAdmins(
-      'Inspección Cancelada',
-      `El ${actor} ha cancelado la inspección del vehículo ${patente}.${reasonText}`,
-      { id: inspection.id, type: NotificationType.CANCELADO_ADMIN }
+      'Cancelación de Inspección',
+      `El ${actor} ha cancelado la inspección del vehículo ${patente}.${reasonText}. Por favor verificar reembolsos o reasignación.`,
+      { 
+          id: inspection.id, 
+          type: NotificationType.CANCELADO_ADMIN,
+          inspectionId: inspection.id,
+          actionUrl: `/(admin)/inspections?highlightId=${inspection.id}`
+      }
     );
 
     // 2. Notify Mechanic (if cancelled by seller)
@@ -565,7 +570,7 @@ export class InspectionsService {
       await this.notificationsService.create({
         userId: inspection.publicacion.vendedorId,
         title: 'Inspección Cancelada',
-        message: `El mecánico ha cancelado la inspección del vehículo ${patente}.${reasonText}`,
+        message: `El mecánico ha cancelado la inspección de su vehículo ${patente}. Es posible que se le reasigne otro inspector.${reasonText}`,
         type: NotificationType.CANCELADO_DUENO,
         relatedId: inspection.id
       });
@@ -577,7 +582,7 @@ export class InspectionsService {
       await this.notificationsService.create({
         userId: inspection.solicitanteId,
         title: 'Inspección Cancelada',
-        message: `El ${actor} ha cancelado la inspección del vehículo ${patente}.${reasonText}`,
+        message: `El ${actor} ha cancelado la inspección solicitada para el vehículo ${patente}. Nos pondremos en contacto para gestionar devolución o reagendamiento.${reasonText}`,
         type: NotificationType.CANCELADO_VEND,
         relatedId: inspection.id
       });
