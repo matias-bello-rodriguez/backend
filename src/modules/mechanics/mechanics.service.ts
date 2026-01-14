@@ -6,6 +6,7 @@ import { Inspection, InspectionStatus } from '../../entities/Inspection.entity';
 import { UserSchedule } from '../../entities/UserSchedule.entity';
 import { SedeSchedule } from '../../entities/SedeSchedule.entity';
 import { Sede } from '../../entities/Sede.entity';
+import { PagoMecanico } from '../../entities/PagoMecanico.entity';
 
 @Injectable()
 export class MechanicsService {
@@ -20,6 +21,8 @@ export class MechanicsService {
     private readonly sedeScheduleRepository: Repository<SedeSchedule>,
     @InjectRepository(Sede)
     private readonly sedeRepository: Repository<Sede>,
+    @InjectRepository(PagoMecanico)
+    private readonly pagoMecanicoRepository: Repository<PagoMecanico>,
   ) {}
 
   async findAll(): Promise<User[]> {
@@ -46,6 +49,13 @@ export class MechanicsService {
     }
 
     return mechanic;
+  }
+
+  async getPayouts(mechanicId: string): Promise<PagoMecanico[]> {
+    return this.pagoMecanicoRepository.find({
+      where: { mecanico_id: mechanicId },
+      order: { fecha_pago: 'DESC' },
+    });
   }
 
   async findByRut(rut: string): Promise<User | null> {

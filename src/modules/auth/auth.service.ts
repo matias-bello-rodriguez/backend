@@ -1,15 +1,46 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import * as nodemailer from 'nodemailer';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 
 @Injectable()
 export class AuthService {
+  private transporter: nodemailer.Transporter;
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
-  ) {}
+    private configService: ConfigService,
+  ) {
+    this.createTransporter();
+  }
+
+  private createTransporter() {
+    const host = this.configService.get<string>('SMTP_HOST');
+    const port = this.configService.get<number>('SMTP_PORT');
+    const user = this.configService.get<string>('SMTP_USER');
+    
+    this.logger.log(`🔧 [SMTP CONFIG CHECK] Host: ${host}, Port: ${port}, User: ${user}`);
+
+    if (host && port && user) {
+        this.transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465, // true for 465, false for other ports
+        auth: {
+            user,
+            pass: this.configService.get<string>('SMTP_PASS'),
+        },
+        });
+        this.logger.log('✅ SMTP Transporter initialized successfully');
+    } else {
+        this.logger.warn('⚠️ SMTP configuration missing. Email sending will be disabled.');
+    }
+  }
 
   async validateUser(email: string, pass: string): Promise<any> {
     const user = await this.usersService.findByEmail(email);
@@ -121,14 +152,48 @@ export class AuthService {
       reset_token_expires: expires,
     });
 
-    // TODO: Implementar envío de email real con el token
-    console.log(`📧 [AUTH] Recovery Token for ${email}: ${token}`);
+    if (this.transporter) {
+      try {
+        await this.transporter.sendMail({
+          from: this.configService.get<string>('SMTP_FROM', '"AutoBox Support" <noreply@autobox.cl>'),
+          to: email,
+          subject: 'Recuperación de Contraseña - AutoBox',
+          html: `
+            <div style="font-family: Arial, sans-serif; padding: 20px;">
+              <h2>Recuperación de Contraseña</h2>
+              <p>Hola ${user.primerNombre || 'Usuario'},</p>
+              <p>Hemos recibido una solicitud para restablecer tu contraseña en AutoBox.</p>
+              <p>Tu código de verificación es:</p>
+              <h1 style="color: #4A90E2; letter-spacing: 5px; background: #f4f6f8; padding: 10px; display: inline-block;">${token}</h1>
+              <p>Este código es válido por 1 hora.</p>
+              <p>Si no solicitaste este cambio, puedes ignorar este correo.</p>
+              <br>
+              <p>Atentamente,<br>El equipo de AutoBox</p>
+            </div>
+          `,
+        });
+        this.logger.log(`✅ Email sent to ${email}`);
+      } catch (error) {
+        this.logger.error(`❌ Error sending email to ${email}:`, error);
+
+        if (error.responseCode === 535) {
+             this.logger.error('💡 HINT: Gmail requires an App Password. Do not use your login password. Go to Google Account > Security > 2-Step Verification > App Passwords.');
+        }
+
+        // Fallback to log if email fails
+        console.log(`📧 [AUTH] Recovery Token for ${email}: ${token}`);
+      }
+    } else {
+      this.logger.warn('⚠️ SMTP not configured. Printing token to console.');
+      // TODO: Implementar envío de email real con el token
+      console.log(`📧 [AUTH] Recovery Token for ${email}: ${token}`);
+    }
     
     return {
       message: 'Token enviado al correo',
       email: user.email,
-      // DEV ONLY: devolver token para pruebas
-      debug_token: token 
+      // DEV ONLY: devolver token si no hay email service
+      debug_token: this.transporter ? 'SENT_VIA_EMAIL' : token 
     };
   }
 
@@ -153,11 +218,9 @@ export class AuthService {
     await this.verifyResetToken(email, token);
     const user = await this.usersService.findByEmail(email);
     
-    const salt = await bcrypt.genSalt();
-    const hashedPassword = await bcrypt.hash(newPassword, salt);
-
+    // Hash is now handled by UsersService.update
     await this.usersService.update(user.id, {
-      password: hashedPassword,
+      password: newPassword,
       reset_token: null,
       reset_token_expires: null,
     });

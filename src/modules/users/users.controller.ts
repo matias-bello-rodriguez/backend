@@ -72,6 +72,16 @@ export class UsersController {
     return this.usersService.remove(id);
   }
 
+  @Get(':id/inspections')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Obtener inspecciones relacionadas al usuario' })
+  getUserInspections(@Request() req, @Param('id') id: string) {
+    if (req.user.rol !== UserRole.ADMINISTRADOR && req.user.id !== id) {
+      throw new ForbiddenException('No tienes permiso para ver las inspecciones de este usuario');
+    }
+    return this.usersService.getInspections(id);
+  }
+
   @Patch(':id/push-token')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Actualizar push token del usuario' })

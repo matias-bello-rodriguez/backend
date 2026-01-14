@@ -53,6 +53,13 @@ export class PaymentsController {
     return this.paymentsService.getPrices();
   }
 
+  @Get('summary')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Obtener resumen financiero' })
+  getSummary() {
+    return this.paymentsService.getFinancialSummary();
+  }
+
   @Post()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Crear pago' })

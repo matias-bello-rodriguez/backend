@@ -72,6 +72,15 @@ export class MechanicsController {
     return this.mechanicsService.getStatistics(id);
   }
 
+  @Get(':id/payouts')
+  @ApiOperation({ summary: 'Obtener pagos (sueldos) del mecánico' })
+  getPayouts(@Request() req, @Param('id') id: string) {
+    if (req.user.rol !== UserRole.ADMINISTRADOR && req.user.id !== id) {
+      throw new ForbiddenException('No tienes permiso para ver los pagos de otro mecánico');
+    }
+    return this.mechanicsService.getPayouts(id);
+  }
+
   @Get(':id/inspections')
   @ApiOperation({ summary: 'Obtener inspecciones del mecánico' })
   getInspections(@Request() req, @Param('id') id: string) {

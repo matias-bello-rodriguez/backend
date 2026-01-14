@@ -7,9 +7,10 @@ import { Inspection } from '../../entities/Inspection.entity';
 import { UserSchedule } from '../../entities/UserSchedule.entity';
 import { SedeSchedule } from '../../entities/SedeSchedule.entity';
 import { Sede } from '../../entities/Sede.entity';
+import { PagoMecanico } from '../../entities/PagoMecanico.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Inspection, UserSchedule, SedeSchedule, Sede])],
+  imports: [TypeOrmModule.forFeature([User, Inspection, UserSchedule, SedeSchedule, Sede, PagoMecanico])],
   controllers: [MechanicsController],
   providers: [MechanicsService],
   exports: [MechanicsService],

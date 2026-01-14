@@ -5,12 +5,15 @@ import { User } from '../../entities/User.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import * as bcrypt from 'bcrypt';
+import { Inspection } from '../../entities/Inspection.entity';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private usersRepository: Repository<User>,
+    @InjectRepository(Inspection)
+    private inspectionRepository: Repository<Inspection>,
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<User> {
@@ -41,7 +44,7 @@ export class UsersService {
     // Incluir el password para la validación de login
     const user = await this.usersRepository.findOne({ 
       where: { email },
-      select: ['id', 'email', 'password', 'primerNombre', 'segundoNombre', 'primerApellido', 'segundoApellido', 'rut', 'telefono', 'rol', 'fechaCreacion', 'fechaNacimiento', 'saldo', 'foto_url']
+      select: ['id', 'email', 'password', 'primerNombre', 'segundoNombre', 'primerApellido', 'segundoApellido', 'rut', 'telefono', 'rol', 'fechaCreacion', 'fechaNacimiento', 'saldo', 'foto_url', 'reset_token', 'reset_token_expires']
     });
     
     if (user) {
@@ -53,15 +56,15 @@ export class UsersService {
     return user;
   }
 
-  async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
+  async update(id: string, changes: Partial<User>): Promise<User> {
     const user = await this.findOne(id);
 
-    if (updateUserDto.password) {
+    if (changes.password) {
       const salt = await bcrypt.genSalt();
-      updateUserDto.password = await bcrypt.hash(updateUserDto.password, salt);
+      changes.password = await bcrypt.hash(changes.password, salt);
     }
 
-    Object.assign(user, updateUserDto);
+    this.usersRepository.merge(user, changes);
     return this.usersRepository.save(user);
   }
 
@@ -148,9 +151,37 @@ export class UsersService {
     }
   }
 
-  async update(id: string, updateUserDto: Partial<User>): Promise<User> {
-    const user = await this.findOne(id);
-    this.usersRepository.merge(user, updateUserDto);
-    return this.usersRepository.save(user);
+  async getInspections(userId: string) {
+    // Inspections where user is the requester
+    const requested = await this.inspectionRepository.find({
+      where: { solicitanteId: userId },
+      relations: ['publicacion', 'publicacion.vehiculo', 'mecanico', 'horario'],
+      order: { fechaCreacion: 'DESC' }
+    });
+
+    // Inspections where user owns the vehicle/publication
+    const asOwner = await this.inspectionRepository
+      .createQueryBuilder('insp')
+      .leftJoinAndSelect('insp.publicacion', 'pub')
+      .leftJoinAndSelect('pub.vehiculo', 'vehicle')
+      .leftJoinAndSelect('insp.mecanico', 'mech')
+      .leftJoinAndSelect('insp.horario', 'sch')
+      // If user is the vendor of the publication OR the owner of the vehicle
+      .where('pub.vendedorId = :userId OR vehicle.userId = :userId', { userId })
+      .orderBy('insp.fechaCreacion', 'DESC')
+      .getMany();
+
+    // Tag and Combine
+    // Use a Map to deduplicate by ID, prioritizing 'SOLICITANTE' if both match (unlikely but safe)
+    const unique = new Map();
+    
+    asOwner.forEach(i => unique.set(i.id, { ...i, relationRole: 'DUENO' }));
+    requested.forEach(i => unique.set(i.id, { ...i, relationRole: 'SOLICITANTE' }));
+    
+    return Array.from(unique.values()).sort((a: any,b: any) => 
+      new Date(b.fechaCreacion).getTime() - new Date(a.fechaCreacion).getTime()
+    );
   }
 }
+
+
