@@ -51,10 +51,16 @@ export class WalletController {
 
   @Post('deposit/transbank/confirm')
   @ApiOperation({ summary: 'Confirmar depósito con Transbank' })
-  @ApiQuery({ name: 'paymentId', required: true })
-  @ApiQuery({ name: 'token', required: true })
+  @ApiQuery({ name: 'paymentId', required: false })
+  @ApiQuery({ name: 'token', required: false })
   @ApiResponse({ status: 200, description: 'Depósito confirmado.' })
-  confirmDeposit(@Query('paymentId') paymentId: string, @Query('token') token: string) {
+  confirmDeposit(
+    @Query('paymentId') queryPaymentId: string,
+    @Query('token') queryToken: string,
+    @Body() body: { paymentId?: string; token?: string },
+  ) {
+    const paymentId = queryPaymentId || body?.paymentId;
+    const token = queryToken || body?.token;
     return this.walletService.confirmDeposit(paymentId, token);
   }
 

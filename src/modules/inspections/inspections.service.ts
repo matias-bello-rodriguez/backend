@@ -213,7 +213,13 @@ export class InspectionsService {
     const orderDirection = order || 'DESC';
     const sortField = sortBy || 'fechaCreacion';
     
-    return this.inspectionsRepository
+    // TAB "De mis Publicaciones": 
+    // Muestra inspecciones asociadas a las publicaciones del usuario (autos que vende),
+    // PERO filtrando para mostrar solo aquellas donde el mismo usuario es el solicitante (Auto-certificación)
+    // o donde no hay solicitante externo.
+    // "Las inspecciones que el dueño hace de sus vehículos".
+
+    const query = this.inspectionsRepository
       .createQueryBuilder('inspection')
       .leftJoinAndSelect('inspection.publicacion', 'publicacion')
       .leftJoinAndSelect('publicacion.vehiculo', 'vehiculo')
@@ -222,8 +228,12 @@ export class InspectionsService {
       .leftJoinAndSelect('horario.sede', 'sede')
       .leftJoinAndSelect('inspection.mecanico', 'mecanico')
       .where('publicacion.vendedorId = :userId', { userId })
-      .orderBy(`inspection.${sortField}`, orderDirection)
-      .getMany();
+      // FILTRO CLAVE: El solicitante debe ser el mismo usuario (Dueño) O estar vacío.
+      .andWhere('(solicitante.id = :userId OR solicitante.id IS NULL)', { userId })
+      .orderBy(`inspection.${sortField}`, orderDirection);
+
+    const results = await query.getMany();
+    return results;
   }
 
   async assignMechanic(inspectionId: string, mechanicId: string) {

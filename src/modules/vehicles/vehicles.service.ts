@@ -140,6 +140,8 @@ export class VehiclesService {
 
     return likes.map(like => {
       const pub = like.publicacion;
+      if (!pub) return null;
+      
       const vehicle = pub.vehiculo;
       
       if (!vehicle) return null;

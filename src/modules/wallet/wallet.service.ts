@@ -130,8 +130,11 @@ export class WalletService {
     // URL de retorno a la app (deep link) o página intermedia
     // Para Expo Go en desarrollo, usar IP local o esquema personalizado
     // Aquí usaremos una página de éxito del backend que redirija a la app
-    const baseUrl = process.env.API_URL || 'http://192.168.0.6:3000';
-    const returnUrl = `${baseUrl}/wallet/public/deposit/transbank/return`;
+    const baseUrl = process.env.API_URL;
+    if (!baseUrl) {
+        console.warn('⚠️ API_URL no está definida en .env. Asegúrate de configurarla correctamente.');
+    }
+    const returnUrl = `${baseUrl || 'http://localhost:3000'}/wallet/public/deposit/transbank/return`;
     
     console.log('Creating Webpay Transaction:');
     console.log('BuyOrder:', buyOrder);
@@ -232,6 +235,51 @@ export class WalletService {
       }
     } catch (error) {
       console.error('Error confirming Webpay transaction:', error);
+      
+      // Si el error es 422 (Transaction already locked), intentar consultar estado
+      if (error?.response?.status === 422 || error?.message?.includes('422') || error?.message?.includes('already locked')) {
+          console.log('🔄 Transacción ya confirmada, consultando estado...');
+          try {
+             // Consultar estado a Transbank
+             const statusResponse = await this.tx.status(token);
+             console.log('📄 Estado recuperado de Transbank:', statusResponse);
+
+             // Actualizar DB si es necesario (Race condition recovery)
+             if (statusResponse.status === 'AUTHORIZED' && statusResponse.response_code === 0) {
+                 if (payment.estado !== PaymentStatus.COMPLETED) {
+                    payment.estado = PaymentStatus.COMPLETED;
+                    await this.paymentsRepository.save(payment);
+
+                    // Verificar si ya se procesó la transacción de billetera para no duplicar
+                    const existingTx = await this.transactionRepository.findOne({
+                        where: { referenciaId: payment.id, tipo: TransactionType.CARGA }
+                    });
+
+                    if (!existingTx) {
+                        await this.processTransaction(
+                          payment.usuarioId,
+                          payment.monto,
+                          TransactionType.CARGA,
+                          payment.id,
+                          'Carga de saldo vía Webpay (Recuperado)',
+                        );
+                    }
+                 }
+                 return { success: true, message: 'Payment successful (Recovered)', data: statusResponse };
+             } else {
+                 // Si está fallido en Transbank
+                  if (payment.estado !== PaymentStatus.FAILED) {
+                     payment.estado = PaymentStatus.FAILED;
+                     await this.paymentsRepository.save(payment);
+                  }
+                  return { success: false, message: 'Payment rejected', data: statusResponse };
+             }
+
+          } catch (statusError) {
+             console.error('Error getting transaction status:', statusError);
+          }
+      }
+
       if (payment.estado === PaymentStatus.COMPLETED) {
          return { success: true, message: 'Payment already processed' };
       }
